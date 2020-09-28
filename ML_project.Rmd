@@ -1,0 +1,165 @@
+---
+title: "ML"
+author: "Ammar Alkhaldi"
+date: "9/9/2020"
+output: html_document
+---
+
+
+## Setup chunk
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(knitr)
+library(skimr)
+library(tidymodels)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+
+# function to match column types
+match_types <- 
+function(obj,types){
+    out <- lapply(1:length(obj),FUN = function(i){FUN1 <- switch(types[i],character = as.character,numeric = as.numeric,factor = as.factor, integer = as.integer, double = as.double); FUN1(obj[,i])})
+    names(out) <- colnames(obj)
+    as.data.frame(out,stringsAsFactors = FALSE)
+}
+
+
+```
+
+
+# Data
+
+```{r data}
+train_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+validation_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+## unifed col types
+
+col_type <- sapply(train_data[,1:159],typeof) %>% as.character()
+
+validation_data[,1:159] <- match_types(validation_data[,1:159], col_type)
+
+skim(train_data)
+
+```
+
+
+## Spliting Data
+
+```{r split}
+
+for_train <- initial_split(train_data, prop = 0.7, strata = classe)
+
+train_set <- training(for_train)
+
+test_set <-  testing(for_train)
+
+#check the ratio
+
+length(train_set$X)/length(train_data$X)
+
+```
+
+
+
+## Preprocessing
+
+```{r preprocessing}
+
+# Near Zero Variance 
+exclude_var <- names(train_set)[1:5] # ID columns
+
+train_rec <- 
+  recipe(classe ~ ., data = train_data) %>% # init setup
+  update_role(all_of(exclude_var) , new_role = "ID") %>% # exclude IDs
+  step_dummy(all_nominal(), -all_outcomes()) %>% # set dummies fro category columns
+  step_meanimpute(all_predictors()) %>%
+  step_zv(all_predictors()) %>% 
+  step_nzv(all_predictors()) 
+#%>%
+#  prep()
+
+ 
+# nzv <- nearZeroVar(train_set)
+# 
+# train_set <- train_set[,-nzv]
+# 
+# test_set <- test_set[,-nzv]
+
+# NAs
+
+# na_cols <- sapply(train_set, function(x) mean(is.na(x))) > 0.95
+# 
+# sum(na_cols)
+# 
+# train_set <- train_set[,!na_cols]
+# test_set <- test_set[,!na_cols]
+# 
+# # remove id and timestamp
+# train_set <- train_set[, -(1:5)]
+# test_set  <- test_set[, -(1:5)]
+
+
+```
+
+
+
+# Correlation Analysis
+
+```{r corr}
+library(lares)
+corr_var(train_set, var = classe)
+
+```
+
+# Modeling
+
+```{r lm model}
+rand_forest_model <-
+rand_forest(trees = 1000, min_n = 5) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+wf <- workflow() %>%
+  add_model(rand_forest_model) %>%
+  add_recipe(train_rec)
+
+rand_forest_fit <-
+  fit(wf, data = training(for_train))
+```
+
+
+```{r predict}
+
+prediction_result <- predict(rand_forest_fit, new_data = test_set)
+
+```
+
+```{r eval}
+test_eval <-
+test_set %>% 
+  select(classe) %>% 
+  bind_cols(predict(rand_forest_fit, test_set))
+  # Add 95% prediction intervals to the results:
+test_eval$classe <- as.factor(test_eval$classe)
+
+accuracy(test_eval,truth = classe, estimate = .pred_res)
+mcc(test_eval,truth = classe, estimate = .pred_res)
+```
+
+```{r validation}
+
+
+predict(rand_forest_fit, new_data = validation_data)
+```
+
+
+
+
+
